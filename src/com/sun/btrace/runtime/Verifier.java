@@ -56,11 +56,13 @@ import com.sun.btrace.org.objectweb.asm.Type;
  * and well-formed.
  * Also it fills the onMethods and onProbes structures with the data taken from
  * the annotations
+ * 验证并且设置onMethods和onProbes数据结构
  *
  * @author A. Sundararajan
  * @autohr J. Bachorik
  */
 public class Verifier extends ClassVisitor {
+    //onMethod中的注解
     public static final String BTRACE_SELF_DESC = Type.getDescriptor(Self.class);
     public static final String BTRACE_RETURN_DESC = Type.getDescriptor(Return.class);
     public static final String BTRACE_TARGETMETHOD_DESC = Type.getDescriptor(TargetMethodOrField.class);
@@ -81,6 +83,7 @@ public class Verifier extends ClassVisitor {
         this.unsafeAllowed = unsafe;
         onMethods = new ArrayList<OnMethod>();
         onProbes = new ArrayList<OnProbe>();
+        //死循环检查
         cycleDetector = new CycleDetector();
     }
 
@@ -102,6 +105,7 @@ public class Verifier extends ClassVisitor {
 
     @Override
     public void visitEnd() {
+        //存在死循环
         if (cycleDetector.hasCycle()) {
             reportError("execution.loop.danger");
         }
@@ -110,17 +114,20 @@ public class Verifier extends ClassVisitor {
 
     public void visit(int version, int access, String name,
             String signature, String superName, String[] interfaces) {
+        //接口、枚举类排除
         if ((access & ACC_INTERFACE) != 0 ||
             (access & ACC_ENUM) != 0  ) {
             reportError("btrace.program.should.be.class");
         }
+        //非public类
         if ((access & ACC_PUBLIC) == 0) {
             reportError("class.should.be.public", name);
         }
-
+        //非Object的子类
         if (! superName.equals(JAVA_LANG_OBJECT)) {
             reportError("object.superclass.required", superName);
         }
+        //接口排除
         if (interfaces != null && interfaces.length > 0) {
             reportError("no.interface.implementation");
         }
@@ -129,8 +136,10 @@ public class Verifier extends ClassVisitor {
                     superName, interfaces);
     }
 
+    //Btrace脚本的类注解解析
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
         AnnotationVisitor delegate = super.visitAnnotation(desc, visible);
+        //有Btrace注解
         if (desc.equals(BTRACE_DESC)) {
             seenBTrace = true;
             return new AnnotationVisitor(Opcodes.ASM4, delegate) {
@@ -148,12 +157,13 @@ public class Verifier extends ClassVisitor {
         }
         return delegate;
     }
-
+    //解析脚本中的成员变量
     public FieldVisitor	visitField(int access, String name,
             String desc, String signature, Object value) {
         if (! seenBTrace) {
             reportError("not.a.btrace.program");
         }
+        //不能有静态类变量
         if ((access & ACC_STATIC) == 0) {
             reportError("agent.no.instance.variables", name);
         }
@@ -162,6 +172,7 @@ public class Verifier extends ClassVisitor {
 
     public void visitInnerClass(String name, String outerName,
             String innerName, int access) {
+        //不能有内部类
         if (className.equals(outerName)) {
             reportError("no.nested.class");
         }
@@ -173,11 +184,11 @@ public class Verifier extends ClassVisitor {
         if (! seenBTrace) {
             reportError("not.a.btrace.program");
         }
-
+        //不能有同步方法
         if ((access & ACC_SYNCHRONIZED) != 0) {
             reportError("no.synchronized.methods", methodName + methodDesc);
         }
-
+        //不能有除构造方法外的非静态方法
         if (! methodName.equals(CONSTRUCTOR)) {
             if ((access & ACC_STATIC) == 0) {
                 reportError("no.instance.method", methodName + methodDesc);
@@ -186,18 +197,20 @@ public class Verifier extends ClassVisitor {
 
         MethodVisitor mv = super.visitMethod(access, methodName,
                    methodDesc, signature, exceptions);
-
+        //创建方法检查器
         return new MethodVerifier(this, mv, className, cycleDetector, methodName + methodDesc) {
             private OnMethod om = null;
             private boolean asBTrace = false;
 
             @Override
             public void visitEnd() {
+                //不能有实例方法
                 if ((access & ACC_PUBLIC) == 0 && !methodName.equals(CLASS_INITIALIZER)) {
                     if (asBTrace) { // only btrace handlers are enforced to be public
                         reportError("method.should.be.public", methodName + methodDesc);
                     }
                 }
+                //返回类型必须为void
                 if (Type.getReturnType(methodDesc) != Type.VOID_TYPE) {
                     if (asBTrace) {
                         reportError("return.type.should.be.void", methodName + methodDesc);
@@ -208,6 +221,7 @@ public class Verifier extends ClassVisitor {
 
             @Override
             public AnnotationVisitor visitParameterAnnotation(int parameter, final String desc, boolean visible) {
+                //解析方法参数中的注解
                 if (desc.equals(BTRACE_SELF_DESC)) {
                     // all allowed
                     if (om != null) {
@@ -289,6 +303,7 @@ public class Verifier extends ClassVisitor {
 
             public AnnotationVisitor visitAnnotation(String desc,
                                   boolean visible) {
+                //解析方法上的注解
                 if (desc.startsWith("Lcom/sun/btrace/annotations/")) {
                     asBTrace = true;
                     cycleDetector.addStarting(new CycleDetector.Node(methodName + methodDesc));
@@ -297,8 +312,11 @@ public class Verifier extends ClassVisitor {
                 if (desc.equals(ONMETHOD_DESC)) {
                     om = new OnMethod();
                     onMethods.add(om);
+                    //脚本方法名称
                     om.setTargetName(methodName);
+                    //脚本方法描述符
                     om.setTargetDescriptor(methodDesc);
+                    //注解中的内容
                     return new AnnotationVisitor(Opcodes.ASM4) {
                         public void visit(String name, Object value) {
                             if (name.equals("clazz")) {
@@ -312,6 +330,7 @@ public class Verifier extends ClassVisitor {
 
                         public AnnotationVisitor visitAnnotation(String name,
                                   String desc) {
+                            //location注解解析
                             if (desc.equals(LOCATION_DESC)) {
                                 final Location loc = new Location();
                                 return new AnnotationVisitor(Opcodes.ASM4) {
@@ -347,6 +366,7 @@ public class Verifier extends ClassVisitor {
                         }
                     };
                 } else if (desc.equals(ONPROBE_DESC)) {
+                    //OnProbe注解
                     final OnProbe op = new OnProbe();
                     onProbes.add(op);
                     op.setTargetName(methodName);

@@ -103,7 +103,9 @@ public class LocalVariablesSorter extends MethodVisitor {
     {
         super(Opcodes.ASM4, mv);
         this.memento = memento;
+        //通过描述符获取参数类型
         Type[] args = Type.getArgumentTypes(desc);
+        //实例方法为1，即this参数占用了0
         memento.nextLocal = (Opcodes.ACC_STATIC & access) == 0 ? 1 : 0;
         for (int i = 0; i < args.length; i++) {
             memento.nextLocal += args[i].getSize();
@@ -154,6 +156,7 @@ public class LocalVariablesSorter extends MethodVisitor {
             opcode == Opcodes.FSTORE ||
             opcode == Opcodes.DSTORE ||
             opcode == Opcodes.ASTORE) {
+            //保存对应关系
             localVarTypeMap.put(var, type);
         }
         mv.visitVarInsn(opcode, remap(var, type));
@@ -200,6 +203,7 @@ public class LocalVariablesSorter extends MethodVisitor {
         }
 
         // creates a copy of newLocals
+        //
         Object[] oldLocals = new Object[memento.newLocals.length];
         System.arraycopy(memento.newLocals, 0, oldLocals, 0, oldLocals.length);
 
@@ -245,7 +249,7 @@ public class LocalVariablesSorter extends MethodVisitor {
 
     /**
      * Creates a new local variable of the given type.
-     *
+     *根据变量类型创建一个本地变量并返回它的id
      * @param type the type of the local variable to be created.
      * @return the identifier of the newly created local variable.
      */
@@ -276,7 +280,9 @@ public class LocalVariablesSorter extends MethodVisitor {
                 t = type.getInternalName();
                 break;
         }
+        //获取下一个位置
         int local = getNextLocal();
+        //根据类型的长度，计算下一个位置的起始数字
         memento.nextLocal += type.getSize();
         setLocalType(local, type);
         setFrameLocal(local, t);
@@ -323,11 +329,13 @@ public class LocalVariablesSorter extends MethodVisitor {
         memento.newLocals[local] = type;
     }
 
+    //重新计算变量在本地变量表的位置
     public int remap(final int var, final Type type) {
+        //如果已经冻结，直接返回
         if (frozen) {
             return var;
         }
-
+        
         if (var < getFirstLocal()) return var;
         
         int key = 2 * var + type.getSize() - 1;

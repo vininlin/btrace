@@ -91,10 +91,11 @@ public class MethodVerifier extends MethodVisitor {
 
     public void visitFieldInsn(int opcode, String owner,
             String name, String desc) {
+        //不能赋值实例变量
         if (opcode == PUTFIELD) {
             reportError("no.assignment");
         }
-
+        //不能赋值类静态变量
         if (opcode == PUTSTATIC) {
             if (!owner.equals(className)) {
                 reportError("no.assignment");
@@ -102,7 +103,7 @@ public class MethodVerifier extends MethodVisitor {
         }
         super.visitFieldInsn(opcode, owner, name, desc);
     }
-
+    //禁止方法体中执行以下指令：变量赋值，同步和抛出异常
     public void visitInsn(int opcode) {
         switch (opcode) {
             case IASTORE:
@@ -127,6 +128,7 @@ public class MethodVerifier extends MethodVisitor {
     }
 
     public void visitIntInsn(int opcode, int operand) {
+        //不能创建数组
         if (opcode == NEWARRAY) {
             reportError("no.array.creation");
         }
@@ -134,6 +136,7 @@ public class MethodVerifier extends MethodVisitor {
     }
 
     public void visitJumpInsn(int opcode, Label label) {
+        //不能跳转。。
         if (labels.get(label) != null) {
             reportError("no.loops");
         }
@@ -174,6 +177,7 @@ public class MethodVerifier extends MethodVisitor {
                 }
                 break;
             case INVOKESTATIC:
+                //除了以下静态方法，其它不能调用
                 if (!owner.equals(BTRACE_UTILS) &&
                     !owner.startsWith(BTRACE_UTILS + "$") &&
                     !owner.equals(className)) {

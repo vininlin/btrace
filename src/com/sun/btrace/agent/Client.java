@@ -64,7 +64,7 @@ import sun.reflect.annotation.AnnotationType;
 /**
  * Abstract class that represents a BTrace client
  * at the BTrace agent.
- *
+ *在agent端代表一个btrace client
  * @author A. Sundararajan
  */
 abstract class Client implements ClassFileTransformer, CommandListener {
@@ -94,6 +94,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         BTraceRuntime.init(createPerfReaderImpl(), new RunnableGeneratorImpl());
     }
 
+    //转换类文件
     final private ClassFileTransformer clInitTransformer = new ClassFileTransformer() {
 
         @Override
@@ -133,6 +134,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         this.inst = inst;
     }  
 
+    @Override
     public byte[] transform(
                 ClassLoader loader,
                 String cname,
@@ -142,6 +144,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         throws IllegalClassFormatException {
         boolean entered = BTraceRuntime.enter();
         try {
+            //btrace内部的类或jdk中的类，忽略
             if (isBTraceClass(cname) || isSensitiveClass(cname)) {
                 if (debug) Main.debugPrint("skipping transform for BTrace class " + cname); // NOI18N
                 return null;
@@ -149,6 +152,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
 
                 if (classBeingRedefined != null) {
                     // class already defined; retransforming
+                    //类已经定义，开始转换
                     if (!skipRetransforms && filter.isCandidate(classBeingRedefined)) {
                         return doTransform(classBeingRedefined, cname, classfileBuffer);
                     } else {
@@ -156,6 +160,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
                     }
                 } else {
                     // class not yet defined
+                    //类没有定义
                     if (!hasSubclassChecks) {
                         if (filter.isCandidate(classfileBuffer)) {
                             return doTransform(classBeingRedefined, cname, classfileBuffer);
@@ -193,6 +198,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         if (debug) Main.debugPrint("client " + className + ": instrumenting " + cname);
         if (trackRetransforms) {
             try {
+                //通知客户端开始转换类
                 onCommand(new RetransformClassNotification(cname));
             } catch (IOException e) {
                 Main.debugPrint(e);
@@ -218,16 +224,19 @@ abstract class Client implements ClassFileTransformer, CommandListener {
     }
 
     protected Class loadClass(InstrumentCommand instr) throws IOException {
+        //获取提交的参数
         String[] args = instr.getArguments();
+        //获取脚本字节码
         this.btraceCode = instr.getCode();
         try {
+            //脚本类校验
             verify(btraceCode);
         } catch (Throwable th) {
             if (debug) Main.debugPrint(th);
             errorExit(th);
             return null;
         }
-
+        //创建类过滤器
         this.filter = new ClassFilter(onMethods);
         if (debug) Main.debugPrint("created class filter");
         
@@ -310,11 +319,14 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         return btraceClazz;
     }
 
+    //判断是否为待转换类
     final boolean isCandidate(Class c) {
         String cname = c.getName().replace('.', '/');
+        //接口，原生 ，数据不转换
         if (c.isInterface() || c.isPrimitive() || c.isArray()) {
             return false;
         }
+        //btrace自己的类不转换
         if (isBTraceClass(cname)) {
             return false;
         } else {
@@ -322,6 +334,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
         }
     }
 
+    //判断是否添加转换，onMethod数组不为空时
     final boolean shouldAddTransformer() {
         return onMethods != null && onMethods.size() > 0;
     }
@@ -332,6 +345,7 @@ abstract class Client implements ClassFileTransformer, CommandListener {
 
     final void startRetransformClasses(int numClasses) {
         try {
+            //通知客户端
             onCommand(new RetransformationStartNotification(numClasses));
             if (Main.isDebug()) Main.debugPrint("calling retransformClasses (" + numClasses + " classes to be retransformed)");
         } catch (IOException e) {
@@ -372,15 +386,21 @@ abstract class Client implements ClassFileTransformer, CommandListener {
     }
 
     private byte[] instrument(Class clazz, String cname, byte[] target) {
+        //转换后的代码
         byte[] instrumentedCode;
         try {
+            //创建一个ASM ClassWriter
             ClassWriter writer = InstrumentUtils.newClassWriter(target);
+            //ClassReader读入字节码
             ClassReader reader = new ClassReader(target);
+            //字节码转换器
             Instrumentor i = new Instrumentor(clazz, className,  btraceCode, onMethods, writer);
+            //开始读入并转换
             InstrumentUtils.accept(reader, i);
             if (Main.isDebug() && !i.hasMatch()) {
                 Main.debugPrint("*WARNING* No method was matched for class " + cname); // NOI18N
             }
+            //写出转换后的字节码
             instrumentedCode = writer.toByteArray();
         } catch (Throwable th) {
             Main.debugPrint(th);
@@ -391,10 +411,14 @@ abstract class Client implements ClassFileTransformer, CommandListener {
     }
 
     private void verify(byte[] buf) {
+        
         ClassReader reader = new ClassReader(buf);
+        //创建一个校验器，解析btrace脚本中的信息同时检验脚本是否合法
         Verifier verifier = new Verifier(new ClassVisitor(Opcodes.ASM4) {}, Main.isUnsafe());
         if (debug) Main.debugPrint("verifying BTrace class");
+        //读入代码和验证器
         InstrumentUtils.accept(reader, verifier);
+        //验证器解析出脚本的信息
         className = verifier.getClassName().replace('/', '.');
         if (debug) Main.debugPrint("verified '" + className + "' successfully");
         onMethods = verifier.getOnMethods();

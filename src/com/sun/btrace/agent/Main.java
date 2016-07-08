@@ -58,7 +58,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * This is the main class for BTrace java.lang.instrument agent.
- *
+ *instrument使用的代码
  * @author A. Sundararajan
  * @authos Joachim Skeie (rolling output)
  */
@@ -87,6 +87,7 @@ public final class Main {
     
     private static final ExecutorService serializedExecutor = Executors.newSingleThreadExecutor(daemonizedThreadFactory);
 
+    //注册JVM退出钩子
     private static void registerExitHook(final Client c) {
         Runtime.getRuntime().addShutdownHook(new Thread(
             new Runnable() {
@@ -126,6 +127,7 @@ public final class Main {
             try {
                 while (tokenizer.hasMoreTokens()) {
                     String path = tokenizer.nextToken();
+                    //添加instrument所需jar文件
                     inst.appendToBootstrapClassLoaderSearch(new JarFile(new File(path)));
                 }
             } catch (IOException ex) {
@@ -134,7 +136,7 @@ public final class Main {
                 return;
             }
         }
-
+        //获取系统类路径
         String systemClassPath = argMap.get("systemClassPath");
         if (systemClassPath != null) {
             if (isDebug()) {
@@ -159,6 +161,7 @@ public final class Main {
             if (isDebug()) debugPrint("noServer is true, server not started");
             return;
         }
+        //代理线程
         Thread agentThread = new Thread(new Runnable() {
             public void run() {
                 BTraceRuntime.enter();
@@ -185,6 +188,7 @@ public final class Main {
     }
 
 
+    //转换代理参数
     private static void parseArgs(String args) {
         if (args == null) {
             args = "";
@@ -370,12 +374,13 @@ public final class Main {
             ioexp.printStackTrace();
             return;
         }
-
+        //启动一个serversocket与client通信
         while (true) {
             try {
                 if (isDebug()) debugPrint("waiting for clients");
                 Socket sock = ss.accept();
                 if (isDebug()) debugPrint("client accepted " + sock);
+                //创建一个Socket客户端
                 Client client = new RemoteClient(inst, sock);
                 registerExitHook(client);
                 handleNewClient(client);
@@ -401,18 +406,23 @@ public final class Main {
         }
     }
 
+    //处理连接进来的客户端
     private static void handleNewClient(final Client client) {
         serializedExecutor.submit(new Runnable() {
 
             public void run() {
                 try {
                     if (isDebug()) debugPrint("new Client created " + client);
+                    //是否添加转换
                     if (client.shouldAddTransformer()) {
+                        //注册转换器，即把客户端通过socket提交的字节码流通过ASM重写
                         client.registerTransformer();
+                        //获取JVM所有加载的classes
                         Class[] classes = inst.getAllLoadedClasses();
                         ArrayList<Class> list = new ArrayList<Class>();
                         if (isDebug()) debugPrint("filtering loaded classes");
                         for (Class c : classes) {
+                            //符合条件的类
                             if (inst.isModifiableClass(c) &&
                                 client.isCandidate(c)) {
                                 if (isDebug()) debugPrint("candidate " + c + " added");
@@ -425,10 +435,12 @@ public final class Main {
                         if (size > 0) {
                             classes = new Class[size];
                             list.toArray(classes);
+                            //添加通知
                             client.startRetransformClasses(size);
                             if (isDebug()) {
                                 for(Class c : classes) {
                                     try {
+                                        //重新转换class，转换器即为上面注册的Client
                                         inst.retransformClasses(c);
                                     } catch (VerifyError e) {
                                         debugPrint("verification error: " + c.getName());
@@ -440,6 +452,7 @@ public final class Main {
                             client.skipRetransforms();
                         }
                     }
+                    //转换完成，发送ok
                     client.getRuntime().send(new OkayCommand());
                 } catch (UnmodifiableClassException uce) {
                     if (isDebug()) {

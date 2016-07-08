@@ -26,6 +26,7 @@
 package com.sun.btrace;
 
 import java.lang.management.ManagementFactory;
+
 import static java.lang.management.ManagementFactory.*;
 import java.lang.instrument.Instrumentation;
 import java.lang.reflect.Method;

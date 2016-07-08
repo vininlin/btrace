@@ -61,6 +61,7 @@ public class CatchInstrumentor extends MethodInstrumentor {
         }
     }
 
+    //
     public void visitTryCatchBlock(Label start, Label end,
         Label handler, String type) {
         if (type != null) {

@@ -52,6 +52,7 @@ public class ArrayAccessInstrumentor extends MethodInstrumentor {
     public void visitInsn(int opcode) {
         boolean arrayload = false;
         boolean arraystore = false;
+        //判断为数组load或者store指令时
         switch (opcode) {
             case IALOAD: case LALOAD:
             case FALOAD: case DALOAD:
@@ -67,12 +68,14 @@ public class ArrayAccessInstrumentor extends MethodInstrumentor {
                 arraystore = true;
                 break;
         }
+        //指令执行前
         if (arrayload) {
             onBeforeArrayLoad(opcode);
         } else if (arraystore) {
             onBeforeArrayStore(opcode);
         }
         super.visitInsn(opcode);
+        //指令执行后
         if (arrayload) {
             onAfterArrayLoad(opcode);
         } else if (arraystore) {
@@ -89,15 +92,16 @@ public class ArrayAccessInstrumentor extends MethodInstrumentor {
     protected void onAfterArrayStore(int opcode) {}
 
     public static void main(final String[] args) throws Exception {
+        String path="E:\\baiduyun\\study\\java\\btrace\\bin\\";
         if (args.length != 1) {
             System.err.println("Usage: java com.sun.btrace.runtime.ArrayAccessInstrumentor <class>");
             System.exit(1);
         }
 
         args[0] = args[0].replace('.', '/');
-        FileInputStream fis = new FileInputStream(args[0] + ".class");
+        FileInputStream fis = new FileInputStream(path+args[0] + ".class");
         ClassReader reader = new ClassReader(new BufferedInputStream(fis));
-        FileOutputStream fos = new FileOutputStream(args[0] + ".class");
+        FileOutputStream fos = new FileOutputStream(path + args[0] + ".class");
         ClassWriter writer = InstrumentUtils.newClassWriter();
         InstrumentUtils.accept(reader, 
             new ClassVisitor(Opcodes.ASM4, writer) {

@@ -88,7 +88,7 @@ public final class Main {
         boolean portDefined = false;
         boolean classpathDefined = false;
         boolean includePathDefined = false;
-
+        //命令行参数解析
         for (;;) {
             if (args[count].charAt(0) == '-') {
                 if (args.length <= count+1) {
@@ -135,8 +135,9 @@ public final class Main {
         if (args.length < (count + 1)) {
             usage();
         }
-
+        //远端JVM进程ID
         String pid = args[count];
+        //脚本文件
         String fileName = args[count + 1];
         String[] btraceArgs = new String[args.length - count];
         if (btraceArgs.length > 0) {
@@ -149,16 +150,20 @@ public final class Main {
             if (! new File(fileName).exists()) {
                 errorExit("File not found: " + fileName, 1);
             }
+            //编译
             byte[] code = client.compile(fileName, classPath, includePath);
             if (code == null) { 
                 errorExit("BTrace compilation failed", 1);
             }
+            //attach
             client.attach(pid);
+            //注册JVM退出勾子
             registerExitHook(client);
             if (con != null) {
                 registerSignalHandler(client);
             }
             if (isDebug()) debugPrint("submitting the BTrace program");
+            //提交到远端代理
             client.submit(fileName, code, btraceArgs,
                 createCommandListener(client));
         } catch (IOException exp) {
@@ -166,6 +171,11 @@ public final class Main {
         }
     }
 
+    /**
+     * 创建命令监听器
+     * @param client
+     * @return
+     */
     private static CommandListener createCommandListener(Client client) {
         return new CommandListener() {
             public void onCommand(Command cmd) throws IOException {
@@ -196,6 +206,7 @@ public final class Main {
                     if (! exiting) {
                         try {
                             if (isDebug()) debugPrint("sending exit command");
+                            //发送退出信息
                             client.sendExit(0);
                         } catch (IOException ioexp) {
                             if (isDebug()) debugPrint(ioexp.toString());

@@ -32,6 +32,8 @@ import java.util.Set;
 import java.util.HashSet;
 import static com.sun.btrace.org.objectweb.asm.Opcodes.*;
 import com.sun.btrace.annotations.Kind;
+import com.sun.btrace.annotations.ProbeClassName;
+import com.sun.btrace.annotations.ProbeMethodName;
 import com.sun.btrace.annotations.Where;
 import java.io.File;
 import java.io.FileInputStream;
@@ -52,7 +54,7 @@ import static com.sun.btrace.runtime.Constants.*;
 /**
  * This instruments a probed class with BTrace probe
  * action class.
- *
+ *使用asm转换目标类和方法
  * @author A. Sundararajan
  */
 public class Instrumentor extends ClassVisitor {
@@ -94,17 +96,20 @@ public class Instrumentor extends ClassVisitor {
         String signature, String superName, String[] interfaces) {
         usesTimeStamp = false;
         timeStampExisting = false;
+        //被转换的类名
         className = name;
         this.superName = superName;
         // we filter the probe methods applicable for this particular
         // class by brute force walking. FIXME: should I optimize?
         String externalName = name.replace('/', '.');
         for (OnMethod om : onMethods) {
+            //获取需要探测的类名
             String probeClazz = om.getClazz();
             if (probeClazz.length() == 0) {
                 continue;
             }
             char firstChar = probeClazz.charAt(0);
+            //开始匹配类
             if (firstChar == '/' &&
                 REGEX_SPECIFIER.matcher(probeClazz).matches()) {
                 probeClazz = probeClazz.substring(1, probeClazz.length() - 1);
@@ -139,6 +144,7 @@ public class Instrumentor extends ClassVisitor {
         super.visit(version, access, name, signature, superName, interfaces);
     }
 
+    //被适配类上的注解
     public AnnotationVisitor visitAnnotation(String desc, boolean visible) {
         AnnotationVisitor av = super.visitAnnotation(desc, visible);
         String extName = Type.getType(desc).getClassName();
@@ -166,18 +172,19 @@ public class Instrumentor extends ClassVisitor {
         return av;
     }
 
+    //被适配类的方法
     public MethodVisitor visitMethod(final int access, final String name,
         final String desc, String signature, String[] exceptions) {
         MethodVisitor methodVisitor = super.visitMethod(access, name, desc,
                 signature, exceptions);
-
+        //过滤不符合条件的方法，抽象、本地和btrace本身的方法
         if (applicableOnMethods.isEmpty() ||
             (access & ACC_ABSTRACT) != 0    ||
             (access & ACC_NATIVE) != 0      ||
             name.startsWith(BTRACE_METHOD_PREFIX)) {
             return methodVisitor;
         }
-
+        //已经存在时间戳方法
         if (name.equals(TimeStampHelper.TIME_STAMP_NAME)) {
             timeStampExisting = true;
             return methodVisitor;
@@ -186,13 +193,15 @@ public class Instrumentor extends ClassVisitor {
         // used to create new local variables while keeping the class internals consistent
         // Call "int index = lvs.newVar(<type>)" to create a new local variable.
         // Then use the generated index to get hold of the variable
+        //本地变量备份
         LocalVariablesSorter.Memento externalState = new LocalVariablesSorter.Memento();
         final LocalVariablesSorter lvs = new LocalVariablesSorter(access, desc, methodVisitor, externalState);
         methodVisitor = lvs;
 
         final int[] tsIndex = new int[]{-1, -1};
-
+        //循环脚本中被触探的方法
         for (OnMethod om : applicableOnMethods) {
+            //访问的是源码行号
             if (om.getLocation().getValue() == Kind.LINE) {
                 methodVisitor = instrumentorFor(om, methodVisitor, lvs, tsIndex, access, name, desc);
             } else {
@@ -200,6 +209,7 @@ public class Instrumentor extends ClassVisitor {
                 if (methodName.equals("")) {
                     methodName = om.getTargetName();
                 }
+                //方法名字匹配且描述符匹配
                 if (methodName.equals(name) &&
                     typeMatches(om.getType(), desc)) {
                     methodVisitor = instrumentorFor(om, methodVisitor, lvs, tsIndex, access, name, desc);
@@ -250,47 +260,79 @@ public class Instrumentor extends ClassVisitor {
         };
     }
 
+    /**
+     * 
+     * @param om
+     * @param mv 
+     * @param lvs 本地变量排序器
+     * @param tsIndex
+     * @param access 方法访问控制符
+     * @param name 方法名称
+     * @param desc 描述符
+     * @return
+     */
     private MethodVisitor instrumentorFor(
         final OnMethod om, MethodVisitor mv, final LocalVariablesSorter lvs,
         final int[] tsIndex, int access, String name, final String desc) {
+        //获取触探的位置
         final Location loc = om.getLocation();
+        //触探的时机
         final Where where = loc.getWhere();
+        //类型参数数组，从方法描述符中获取
         final Type[] actionArgTypes = Type.getArgumentTypes(om.getTargetDescriptor());
+        //脚本参数个数
         final int numActionArgs = actionArgTypes.length;
-
+        //处理触探位置类型值
         switch (loc.getValue()) {
             case ARRAY_GET:
                 // <editor-fold defaultstate="collapsed" desc="Array Get Instrumentor">
+                //获取数组时~返回一个数组访问器，并且在脚本方法参数中传入数组访问的索引和类型
                 return new ArrayAccessInstrumentor(mv, className, superName, access, name, desc) {
+                    //参数索引
                     int[] argsIndex = new int[]{-1, -1};
                     final private int INSTANCE_PTR = 0;
                     final private int INDEX_PTR = 1;
 
                     @Override
                     protected void onBeforeArrayLoad(int opcode) {
+                        //通过opcode获取数组类型
                         Type arrtype = TypeUtils.getArrayType(opcode);
+                        //获取数组元素类型
                         Type retType = TypeUtils.getElementType(opcode);
+                        //@Self信息
                         addExtraTypeInfo(om.getSelfParameter(), Type.getObjectType(className));
+                        //@Return信息
                         if (where == Where.AFTER) {
                             addExtraTypeInfo(om.getReturnParameter(), retType);
                         }
+                        //参数验证结果，
                         ValidationResult vr = validateArguments(om, isStatic(), actionArgTypes, new Type[]{arrtype, Type.INT_TYPE});
                         if (vr.isValid()) {
                             lvs.freeze();
                             try {
+                                //不是AnyType
                                 if (!vr.isAny()) {
+                                    //复制栈顶一个long或者是double的数据并将复制的值也压入到栈顶
                                     dup2();
+                                    //数组索引下标值变量
                                     argsIndex[INDEX_PTR] = lvs.newLocal(Type.INT_TYPE);
+                                    //数组中实例类型，
                                     argsIndex[INSTANCE_PTR] = lvs.newLocal(arrtype);
                                 }
                                 if (where == Where.BEFORE) {
+                                    //创建以下本地变量或常量，推到栈顶
                                     loadArguments(
+                                        //数组下标
                                         new LocalVarArgProvider(vr.getArgIdx(INDEX_PTR), Type.INT_TYPE, argsIndex[INDEX_PTR]),
+                                        //数组下标对应实例
                                         new LocalVarArgProvider(vr.getArgIdx(INSTANCE_PTR), arrtype, argsIndex[INSTANCE_PTR]),
+                                        //@ProbeClassName参数
                                         new ConstantArgProvider(om.getClassNameParameter(), className.replace("/", ".")),
+                                        //@ProbeMethodName参数
                                         new ConstantArgProvider(om.getMethodParameter(), getName(om.isMethodFqn())),
+                                        //@Self参数
                                         new LocalVarArgProvider(om.getSelfParameter(), Type.getObjectType(className), 0));
-
+                                    //添加调用指令和生成script方法
                                     invokeBTraceAction(this, om);
                                 }
                             } finally {
@@ -315,7 +357,7 @@ public class Instrumentor extends ClassVisitor {
                                         dupArrayValue(opcode);
                                         retValIndex = lvs.newLocal(retType);
                                     }
-
+                                    //如果有返回值，增加返回值
                                     loadArguments(
                                         new LocalVarArgProvider(vr.getArgIdx(INDEX_PTR), Type.INT_TYPE, argsIndex[INDEX_PTR]),
                                         new LocalVarArgProvider(vr.getArgIdx(INSTANCE_PTR), arrtype, argsIndex[INSTANCE_PTR]),
@@ -403,10 +445,13 @@ public class Instrumentor extends ClassVisitor {
 
             case CALL:
                 // <editor-fold defaultstate="collapsed" desc="Method Call Instrumentor">
+                //执行方法调用时
                 return new MethodCallInstrumentor(mv, className, superName, access, name, desc) {
-
+                    //被调用方法的类名
                     private String localClassName = loc.getClazz();
+                    //被调用的方法名称
                     private String localMethodName = loc.getMethod();
+                    //返回值
                     private int returnVarIndex = -1;
                     int[] backupArgsIndexes;
 
@@ -447,13 +492,14 @@ public class Instrumentor extends ClassVisitor {
 
                     @Override
                     protected void onBeforeCallMethod(int opcode, String owner, String name, String desc) {
+                        //静态方法没有this
                         if (isStatic() && om.getSelfParameter() > -1) {
                             return; // invalid combination; a static method can not provide *this*
                         }
                         if (matches(localClassName, owner.replace('/', '.'))
                                 && matches(localMethodName, name)
                                 && typeMatches(loc.getType(), desc)) {
-
+                            //类名、方法名称、类型匹配成功
                             String method = (om.isTargetMethodOrFieldFqn() ? (owner + ".") : "") + name + (om.isTargetMethodOrFieldFqn() ? desc : "");
                             Type[] calledMethodArgs = Type.getArgumentTypes(desc);
                             addExtraTypeInfo(om.getSelfParameter(), Type.getObjectType(className));
@@ -468,7 +514,6 @@ public class Instrumentor extends ClassVisitor {
                                     if (isStaticCall) {
                                         if (om.getTargetInstanceParameter() != -1) {
                                             return;
-
                                         }
                                     } else {
                                         if (where == Where.BEFORE && name.equals(CONSTRUCTOR)) {
@@ -476,8 +521,10 @@ public class Instrumentor extends ClassVisitor {
                                         }
                                     }
                                     // will store the call args into local variables
+                                    //保存被调用方法的参数到局部变量中
                                     backupArgsIndexes = backupStack(lvs, Type.getArgumentTypes(desc), isStaticCall);
                                     if (where == Where.BEFORE) {
+                                        //在调用之前注入
                                         injectBtrace(vr, method, Type.getArgumentTypes(desc), Type.getReturnType(desc));
                                     }
                                     // put the call args back on stack so the method call can find them
@@ -529,10 +576,12 @@ public class Instrumentor extends ClassVisitor {
 
             case CATCH:
                 // <editor-fold defaultstate="collapsed" desc="Catch Instrumentor">
+                //抛出异常时
                 return new CatchInstrumentor(mv, className, superName, access, name, desc) {
 
                     @Override
                     protected void onCatch(String type) {
+                        //异常类型
                         Type exctype = Type.getObjectType(type);
                         addExtraTypeInfo(om.getSelfParameter(), Type.getObjectType(className));
                         ValidationResult vr = validateArguments(om, isStatic(), actionArgTypes, new Type[]{exctype});
@@ -541,7 +590,9 @@ public class Instrumentor extends ClassVisitor {
                             lvs.freeze();
                             try {
                                 if (!vr.isAny()) {
+                                    //栈顶复制
                                     dup();
+                                    //创建一个异常类型局部变量表索引
                                     index = lvs.newLocal(exctype);
                                 }
                                 loadArguments(
@@ -560,6 +611,7 @@ public class Instrumentor extends ClassVisitor {
 
             case CHECKCAST:
                 // <editor-fold defaultstate="collapsed" desc="CheckCast Instrumentor">
+                //执行类型检查时，instanceof
                 return new TypeCheckInstrumentor(mv, className, superName, access, name, desc) {
 
                     private void callAction(int opcode, String desc) {
@@ -997,19 +1049,25 @@ public class Instrumentor extends ClassVisitor {
                     @Override
                     protected void beforeObjectNew(String desc) {
                         if (loc.getWhere() == Where.BEFORE) {
+                            //对象名称
                             String extName = desc.replace('/', '.');
+                            //指定触探的对象匹配的话
                             if (matches(loc.getClazz(), extName)) {
+                                //@Self参数
                                 addExtraTypeInfo(om.getSelfParameter(), Type.getObjectType(className));
+                                //脚本方法参数验证
                                 ValidationResult vr = validateArguments(om, isStatic(), actionArgTypes, new Type[]{TypeUtils.stringType});
-                                if (vr.isValid()) {
+                                if (vr.isValid()) {//合法
+                                    //冻结本地变量
                                     lvs.freeze();
                                     try {
+                                        //注入3个常量和本地self变量
                                         loadArguments(
                                             new ConstantArgProvider(vr.getArgIdx(0), extName),
                                             new ConstantArgProvider(om.getClassNameParameter(), className.replace("/", ".")),
                                             new ConstantArgProvider(om.getMethodParameter(), getName(om.isMethodFqn())),
                                             new LocalVarArgProvider(om.getSelfParameter(), Type.getObjectType(className), 0));
-
+                                        //调用脚本方法把脚本方法复制到当前类中
                                         invokeBTraceAction(this, om);
                                     } finally {
                                         lvs.unfreeze();
@@ -1350,17 +1408,21 @@ public class Instrumentor extends ClassVisitor {
             TimeStampHelper.generateTimeStampGetter(this);
         }
     }
-
+    //最后把脚本方法添加到转换换的类中
     public void visitEnd() {
         int size = applicableOnMethods.size();
         List<MethodCopier.MethodInfo> mi = new ArrayList<MethodCopier.MethodInfo>(size);
         for (OnMethod om : calledOnMethods) {
+            //方法信息
+            // private static $btrace$btraceClassName$methodName(){}
             mi.add(new MethodCopier.MethodInfo(om.getTargetName(),
                      om.getTargetDescriptor(),
                      getActionMethodName(om.getTargetName()),
                      ACC_STATIC | ACC_PRIVATE));
         }
+        //System.nanoTime();
         introduceTimeStampHelper();
+        //创建一个方法拷贝器
         MethodCopier copier = new MethodCopier(btraceClass, cv, mi) {
             @Override
             protected MethodVisitor addMethod(int access, String name, String desc,
@@ -1411,6 +1473,7 @@ public class Instrumentor extends ClassVisitor {
     }
 
     private void invokeBTraceAction(MethodInstrumentor mv, OnMethod om) {
+        //调用脚本方法~,脚本方法已经copy到了被转换的类中
         mv.invokeStatic(className, getActionMethodName(om.getTargetName()),
             om.getTargetDescriptor().replace(ANYTYPE_DESC, OBJECT_DESC));
         calledOnMethods.add(om);

@@ -40,7 +40,7 @@ import com.sun.btrace.comm.WireIO;
 
 /**
  * Represents a remote client communicated by socket.
- *
+ *一个远程的socket客户端
  * @author A. Sundararajan
  */
 class RemoteClient extends Client {
@@ -53,9 +53,12 @@ class RemoteClient extends Client {
         this.sock = sock;
         this.ois = new ObjectInputStream(sock.getInputStream());
         this.oos = new ObjectOutputStream(sock.getOutputStream());
+        //读取客户端提交的流
         Command cmd = WireIO.read(ois);
+        //命令类型为Instrument
         if (cmd.getType() == Command.INSTRUMENT) {
             if (debug) Main.debugPrint("got instrument command");
+            //加载类和验证类
             Class btraceClazz = loadClass((InstrumentCommand)cmd);
             if (btraceClazz == null) {
                 throw new RuntimeException("can not load BTrace class");
@@ -64,6 +67,7 @@ class RemoteClient extends Client {
             errorExit(new IllegalArgumentException("expecting instrument command!"));
             throw new IOException("expecting instrument command!");
         } 
+        //启动一个线程处理客户端命令
         Thread cmdHandler = new Thread(new Runnable() {
             public void run() {
                 BTraceRuntime.enter();                

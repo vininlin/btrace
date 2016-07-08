@@ -180,6 +180,7 @@ public class MethodInstrumentor extends MethodVisitor {
         abstract protected void doProvide();
     }
 
+    //本地变量参数提供器
     protected class LocalVarArgProvider extends ArgumentProvider {
         private Type type;
         private int ptr;
@@ -191,6 +192,7 @@ public class MethodInstrumentor extends MethodVisitor {
         }
 
         public void doProvide() {
+            //加载本地变量
             loadLocal(type, ptr);
         }
 
@@ -201,6 +203,7 @@ public class MethodInstrumentor extends MethodVisitor {
 
     }
 
+    //常量参数提供器
     protected class ConstantArgProvider extends ArgumentProvider {
         private Object constant;
 
@@ -210,6 +213,7 @@ public class MethodInstrumentor extends MethodVisitor {
         }
         
         public void doProvide() {
+            //常量加载
             visitLdcInsn(constant);
         }
 
@@ -237,10 +241,14 @@ public class MethodInstrumentor extends MethodVisitor {
             push(myArgTypes.length);
             visitTypeInsn(ANEWARRAY, TypeUtils.objectType.getInternalName());
             for (int j = 0; j < myArgTypes.length; j++) {
+                //栈顶复制
                 dup();
+                //推到栈上
                 push(j);
                 Type argType = myArgTypes[j];
+                //加载
                 loadLocal(argType, argPtr);
+                //包装
                 box(argType);
                 arrayStore(TypeUtils.objectType);
                 argPtr += argType.getSize();
@@ -298,6 +306,7 @@ public class MethodInstrumentor extends MethodVisitor {
     }
 
     protected void loadArguments(ArgumentProvider ... argumentProviders) {
+        //参数按索引排序
         Arrays.sort(argumentProviders, new Comparator<ArgumentProvider>() {
             public int compare(ArgumentProvider o1, ArgumentProvider o2) {
                 if (o1 == null && o2 == null) {
@@ -315,7 +324,7 @@ public class MethodInstrumentor extends MethodVisitor {
                 return 1;
             }
         });
-
+        //执行LOAD指令
         for(ArgumentProvider provider : argumentProviders) {
             if (provider != null) provider.provide();
         }
@@ -673,13 +682,24 @@ public class MethodInstrumentor extends MethodVisitor {
         return superClz;
     }
 
+    //btrace脚本方法验证
+    /**
+     * 
+     * @param om 
+     * @param staticFlag 是否为静态
+     * @param actionArgTypes action的参数类型数组
+     * @param methodArgTypes 
+     * @return
+     */
     protected ValidationResult validateArguments(OnMethod om, boolean staticFlag, Type[] actionArgTypes, Type[] methodArgTypes) {
         int specialArgsCount = 0;
-
+        //存在@Self参数
         if (om.getSelfParameter() != -1) {
+            //静态方法返回非法
             if (staticFlag) {
                 return INVALID;
             }
+            //获取self参数类型
             Type selfType = extraTypes.get(om.getSelfParameter());
             if (selfType == null) {
                 if (!TypeUtils.isObject(actionArgTypes[om.getSelfParameter()])) { 
@@ -752,10 +772,11 @@ public class MethodInstrumentor extends MethodVisitor {
             }
             specialArgsCount++;
         }
-
+        
+        //减去特殊的参数之后，才是需要处理的参数
         Type[] cleansedArgArray = new Type[actionArgTypes.length - specialArgsCount];
         int[] cleansedArgIndex = new int[cleansedArgArray.length];
-
+        //赋值
         int counter = 0;
         for (int argIndex = 0; argIndex < actionArgTypes.length; argIndex++) {
             if (argIndex != om.getSelfParameter() &&
@@ -770,9 +791,11 @@ public class MethodInstrumentor extends MethodVisitor {
                 counter++;
             }
         }
+        //如果没有要处理的参数，返回ANY
         if (cleansedArgArray.length == 0) {
             return ANY;
         } else {
+            //
             if (cleansedArgArray.length > 0) {
                 if (!TypeUtils.isAnyTypeArray(cleansedArgArray[0]) &&
                     !TypeUtils.isCompatible(cleansedArgArray, methodArgTypes)) {
@@ -780,6 +803,7 @@ public class MethodInstrumentor extends MethodVisitor {
                 }
             }
         }
+        //返回要处理的参数索引数组
         return new ValidationResult(true, cleansedArgIndex);
     }
 } 

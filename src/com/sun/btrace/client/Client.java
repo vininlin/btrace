@@ -139,6 +139,12 @@ public class Client {
         this.trackRetransforms = trackRetransforms;
     }
 
+    /**
+     * 编译脚本文件
+     * @param fileName
+     * @param classPath
+     * @return
+     */
     public byte[] compile(String fileName, String classPath) {
         return compile(fileName, classPath, new PrintWriter(System.err), null);
     }
@@ -164,6 +170,7 @@ public class Client {
         byte[] code = null;
         File file = new File(fileName);
         if (fileName.endsWith(".java")) {
+            //编译Java文件
             Compiler compiler = new Compiler(includePath);
             classPath += File.pathSeparator + System.getProperty("java.class.path");
             if (debug) {
@@ -220,6 +227,7 @@ public class Client {
      */
     public void attach(String pid) throws IOException {
         try {
+            //代理的jar路径
             String agentPath = "/btrace-agent.jar";
             String tmp = Client.class.getClassLoader().getResource("com/sun/btrace").toString();
             tmp = tmp.substring(0, tmp.indexOf("!"));
@@ -248,6 +256,7 @@ public class Client {
             if (debug) {
                 debugPrint("attaching to " + pid);
             }
+            //attach到指定的虚拟机pid
             vm = VirtualMachine.attach(pid);
             if (debug) {
                 debugPrint("checking port availability: " + port);
@@ -287,6 +296,7 @@ public class Client {
             if (bootCp != null) {
                 agentArgs += ",bootClassPath=" + bootCp;
             }
+            //默认sun tools
             if (sysCp == null) {
                 sysCp = getToolsJarPath();
             }
@@ -295,6 +305,7 @@ public class Client {
             if (debug) {
                 debugPrint("agent args: " + agentArgs);
             }
+            //加载代理
             vm.loadAgent(agentPath, agentArgs);
             if (debug) {
                 debugPrint("loaded " + agentPath);
@@ -324,12 +335,15 @@ public class Client {
             if (debug) {
                 debugPrint("opening socket to " + port);
             }
+            //打开一个本地端口socket与代理通信
             sock = new Socket("localhost", port);
             oos = new ObjectOutputStream(sock.getOutputStream());
             if (debug) {
                 debugPrint("sending instrument command");
             }
+            //把脚本字节码和参数写到输出流
             WireIO.write(oos, new InstrumentCommand(code, args));
+            //获取服务端返回的流
             ois = new ObjectInputStream(sock.getInputStream());
             if (debug) {
                 debugPrint("entering into command loop");
@@ -435,6 +449,7 @@ public class Client {
         WireIO.write(oos, cmd);
     }
 
+    //循环输出命令行监听结果
     private void commandLoop(CommandListener listener)
             throws IOException {
         assert ois != null : "null input stream?";
